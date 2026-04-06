@@ -108,6 +108,6 @@ If the dashboard loads, installation is complete. The server will auto-start on 
 - Config: `~/.mission-control/config.json`
 - Logs: `~/.mission-control/logs/`
 - Default port: `3456`
-- The server auto-starts on login via macOS Launch Agent
+- The server auto-starts on login (macOS Launch Agent, Linux systemd, or Windows Startup script)
 - Only tab titles and URLs are sent to the LLM — browsing history stays local
 - The `openai` npm package handles all LLM communication — any OpenAI-compatible API works

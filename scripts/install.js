@@ -1,21 +1,17 @@
 // scripts/install.js
 // ─────────────────────────────────────────────────────────────────────────────
-// One-time setup script for Tab Out.
+// One-time setup script for Tab Out. Cross-platform: macOS, Windows, Linux.
 //
-// Run this once with: npm run install-service
+// Run with: npm run install-service
 //
 // What it does:
-//   1. Creates the ~/.mission-control/ directory (where data + config live)
-//   2. Creates ~/.mission-control/logs/ (where the server's output goes)
+//   1. Creates the ~/.mission-control/ directory (data + config)
+//   2. Creates ~/.mission-control/logs/ (server output)
 //   3. Creates a default config.json IF one doesn't already exist
-//      (IMPORTANT: if a config already exists, we leave it untouched —
-//       you may have a real API key in there!)
-//   4. Installs a macOS "Launch Agent" — think of this as telling macOS
-//      "please run this server automatically when I log in."
-//      The Launch Agent is a small XML file (called a .plist) that macOS
-//      reads from ~/Library/LaunchAgents/.
-//   5. Tells macOS to load (activate) that Launch Agent right now,
-//      so you don't have to log out and back in.
+//   4. Installs a platform-specific auto-start service:
+//      - macOS:   Launch Agent (~/Library/LaunchAgents/)
+//      - Linux:   systemd user service (~/.config/systemd/user/)
+//      - Windows: Startup folder shortcut or VBS script
 // ─────────────────────────────────────────────────────────────────────────────
 
 const fs         = require('fs');
@@ -23,179 +19,210 @@ const path       = require('path');
 const os         = require('os');
 const { execSync } = require('child_process');
 
-// Import the paths and defaults from config.js so we stay DRY
-// (DRY = "Don't Repeat Yourself" — a core engineering principle)
-const { CONFIG_DIR, CONFIG_FILE, DEFAULTS } = require('../server/config.js');
+// Import config paths and defaults
+const config = require('../server/config.js');
+const CONFIG_DIR  = config.CONFIG_DIR;
+const CONFIG_FILE = config.CONFIG_FILE;
+const DEFAULTS    = config.DEFAULTS;
 
-// ── Directory paths ───────────────────────────────────────────────────────────
-const LOGS_DIR    = path.join(CONFIG_DIR, 'logs');
+// ── Shared paths ─────────────────────────────────────────────────────────────
+const LOGS_DIR     = path.join(CONFIG_DIR, 'logs');
+const PROJECT_DIR  = path.resolve(__dirname, '..');
+const SERVER_ENTRY = path.resolve(PROJECT_DIR, 'server', 'index.js');
 
-// The Launch Agent plist lives in a standard macOS location.
-// macOS automatically scans this folder on login.
-const PLIST_DIR   = path.join(os.homedir(), 'Library', 'LaunchAgents');
-const PLIST_FILE  = path.join(PLIST_DIR, 'com.mission-control.plist');
-const PLIST_LABEL = 'com.mission-control';
+// Resolve the node binary path
+let NODE_BIN;
+try {
+  NODE_BIN = execSync(process.platform === 'win32' ? 'where node' : 'which node',
+    { encoding: 'utf8' }).trim().split('\n')[0].trim();
+} catch (_) {
+  NODE_BIN = process.execPath;
+}
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
-/**
- * Creates a directory if it doesn't already exist.
- * The { recursive: true } option means: create parent dirs too, no error if
- * dir already exists. Safe to call multiple times.
- */
 function ensureDir(dirPath) {
   if (!fs.existsSync(dirPath)) {
     fs.mkdirSync(dirPath, { recursive: true });
-    console.log(`[install] Created directory: ${dirPath}`);
+    console.log(`  Created: ${dirPath}`);
   } else {
-    console.log(`[install] Directory already exists: ${dirPath}`);
+    console.log(`  Exists:  ${dirPath}`);
   }
 }
 
-/**
- * Build the XML content for the macOS Launch Agent plist.
- *
- * A Launch Agent is macOS's built-in way to run background services.
- * Think of it like a startup item but with more control.
- *
- * Key settings:
- *   - Label: a unique reverse-DNS identifier for this service
- *   - ProgramArguments: the command to run (node + our server entry point)
- *   - KeepAlive: true means macOS will restart it if it crashes
- *   - RunAtLoad: true means start immediately when the agent is loaded
- *   - StandardOutPath / StandardErrorPath: where to write logs
- */
-function buildPlistContent() {
-  // Resolve the node binary path via `which node` for maximum portability.
-  // process.execPath works too but can sometimes point to a version manager
-  // shim rather than the real binary. We prefer `which node` so the plist
-  // uses the actual executable that will survive shell restarts.
-  let nodeBin;
-  try {
-    nodeBin = execSync('which node', { encoding: 'utf8' }).trim();
-  } catch (_) {
-    // Fall back to the path of the node binary running this script
-    nodeBin = process.execPath;
-  }
+// ── macOS: Launch Agent ──────────────────────────────────────────────────────
 
-  // Absolute path to our server entry point — derived from this file's
-  // location (__dirname) so it works regardless of where the repo was cloned.
-  const serverEntry = path.join(__dirname, '..', 'server', 'index.js');
+function installMacOS() {
+  const plistDir  = path.join(os.homedir(), 'Library', 'LaunchAgents');
+  const plistFile = path.join(plistDir, 'com.tab-out.plist');
+  const label     = 'com.tab-out';
 
-  // Resolve to a clean absolute path (no ".." segments)
-  const serverPath  = path.resolve(serverEntry);
+  ensureDir(plistDir);
 
-  return `<?xml version="1.0" encoding="UTF-8"?>
+  const plist = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
-  <dict>
+<dict>
+  <key>Label</key>
+  <string>${label}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>${NODE_BIN}</string>
+    <string>${SERVER_ENTRY}</string>
+  </array>
+  <key>KeepAlive</key>
+  <true/>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>${path.join(LOGS_DIR, 'tab-out.log')}</string>
+  <key>StandardErrorPath</key>
+  <string>${path.join(LOGS_DIR, 'tab-out.error.log')}</string>
+  <key>WorkingDirectory</key>
+  <string>${PROJECT_DIR}</string>
+</dict>
+</plist>`;
 
-    <!-- Unique identifier for this Launch Agent -->
-    <key>Label</key>
-    <string>${PLIST_LABEL}</string>
+  fs.writeFileSync(plistFile, plist);
+  console.log(`  Wrote Launch Agent: ${plistFile}`);
 
-    <!-- The command macOS will run: node /path/to/server/index.js -->
-    <key>ProgramArguments</key>
-    <array>
-      <string>${nodeBin}</string>
-      <string>${serverPath}</string>
-    </array>
+  // Also unload old com.mission-control plist if it exists (migration)
+  const oldPlist = path.join(plistDir, 'com.mission-control.plist');
+  if (fs.existsSync(oldPlist)) {
+    try { execSync(`launchctl unload "${oldPlist}" 2>/dev/null`, { stdio: 'pipe' }); } catch {}
+    fs.unlinkSync(oldPlist);
+    console.log('  Removed old com.mission-control Launch Agent');
+  }
 
-    <!-- KeepAlive: if the server crashes or is killed, macOS restarts it -->
-    <key>KeepAlive</key>
-    <true/>
-
-    <!-- RunAtLoad: start the service as soon as the agent is loaded -->
-    <key>RunAtLoad</key>
-    <true/>
-
-    <!-- Standard output log (normal messages) -->
-    <key>StandardOutPath</key>
-    <string>${path.join(LOGS_DIR, 'mission-control.log')}</string>
-
-    <!-- Standard error log (error messages) -->
-    <key>StandardErrorPath</key>
-    <string>${path.join(LOGS_DIR, 'mission-control.error.log')}</string>
-
-    <!-- Working directory for the server process -->
-    <key>WorkingDirectory</key>
-    <string>${path.resolve(__dirname, '..')}</string>
-
-  </dict>
-</plist>
-`;
+  try {
+    try { execSync(`launchctl unload "${plistFile}" 2>/dev/null`, { stdio: 'pipe' }); } catch {}
+    execSync(`launchctl load -w "${plistFile}"`, { stdio: 'inherit' });
+    console.log('  Launch Agent loaded — Tab Out will start on login');
+  } catch (err) {
+    console.warn(`  Warning: launchctl load failed: ${err.message}`);
+    console.warn(`  Run manually: launchctl load -w "${plistFile}"`);
+  }
 }
 
-// ── Main install steps ────────────────────────────────────────────────────────
+// ── Linux: systemd user service ──────────────────────────────────────────────
+
+function installLinux() {
+  const serviceDir  = path.join(os.homedir(), '.config', 'systemd', 'user');
+  const serviceFile = path.join(serviceDir, 'tab-out.service');
+
+  ensureDir(serviceDir);
+
+  const service = `[Unit]
+Description=Tab Out — AI tab manager
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=${NODE_BIN} ${SERVER_ENTRY}
+WorkingDirectory=${PROJECT_DIR}
+Restart=always
+RestartSec=5
+StandardOutput=append:${path.join(LOGS_DIR, 'tab-out.log')}
+StandardError=append:${path.join(LOGS_DIR, 'tab-out.error.log')}
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=default.target
+`;
+
+  fs.writeFileSync(serviceFile, service);
+  console.log(`  Wrote systemd service: ${serviceFile}`);
+
+  try {
+    execSync('systemctl --user daemon-reload', { stdio: 'pipe' });
+    execSync('systemctl --user enable tab-out', { stdio: 'pipe' });
+    execSync('systemctl --user start tab-out', { stdio: 'pipe' });
+    console.log('  systemd service enabled and started — Tab Out will start on login');
+  } catch (err) {
+    console.warn(`  Warning: systemctl failed: ${err.message}`);
+    console.warn('  Run manually:');
+    console.warn('    systemctl --user daemon-reload');
+    console.warn('    systemctl --user enable tab-out');
+    console.warn('    systemctl --user start tab-out');
+  }
+}
+
+// ── Windows: Startup folder VBS script ───────────────────────────────────────
+
+function installWindows() {
+  // Windows Startup folder — programs/scripts here run on login
+  const startupDir = path.join(os.homedir(), 'AppData', 'Roaming',
+    'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup');
+
+  // Use a VBS wrapper so the server runs without a visible console window
+  const vbsFile = path.join(startupDir, 'tab-out.vbs');
+
+  // The VBS script silently runs node in the background
+  const vbs = `' Tab Out — auto-start script (runs without visible window)
+Set WshShell = CreateObject("WScript.Shell")
+WshShell.CurrentDirectory = "${PROJECT_DIR.replace(/\\/g, '\\\\')}"
+WshShell.Run """${NODE_BIN.replace(/\\/g, '\\\\')}"" ""${SERVER_ENTRY.replace(/\\/g, '\\\\')}"" > ""${path.join(LOGS_DIR, 'tab-out.log').replace(/\\/g, '\\\\')}"" 2>&1", 0, False
+`;
+
+  if (fs.existsSync(startupDir)) {
+    fs.writeFileSync(vbsFile, vbs);
+    console.log(`  Wrote startup script: ${vbsFile}`);
+    console.log('  Tab Out will start automatically on login (no console window)');
+  } else {
+    // Fallback: try creating a batch file in startup
+    console.warn(`  Startup folder not found at: ${startupDir}`);
+    const batFile = path.join(PROJECT_DIR, 'start-tab-out.bat');
+    const bat = `@echo off\ncd /d "${PROJECT_DIR}"\nstart /b "" "${NODE_BIN}" "${SERVER_ENTRY}"\n`;
+    fs.writeFileSync(batFile, bat);
+    console.log(`  Created ${batFile} — add this to your startup manually`);
+  }
+}
+
+// ── Main ─────────────────────────────────────────────────────────────────────
 
 function main() {
-  console.log('\n=== Tab Out — Install Script ===\n');
+  const platform = process.platform;
+  console.log('\n=== Tab Out — Install ===\n');
+  console.log(`Platform: ${platform}`);
+  console.log(`Node: ${NODE_BIN}`);
+  console.log(`Server: ${SERVER_ENTRY}\n`);
 
-  // Step 1: Create ~/.mission-control/
-  console.log('Step 1: Setting up data directory...');
+  // Step 1: Data directory
+  console.log('1. Data directory');
   ensureDir(CONFIG_DIR);
 
-  // Step 2: Create ~/.mission-control/logs/
-  console.log('\nStep 2: Setting up logs directory...');
+  // Step 2: Logs directory
+  console.log('\n2. Logs directory');
   ensureDir(LOGS_DIR);
 
-  // Step 3: Create config.json ONLY if it doesn't already exist.
-  // We are very careful here — if you already have a config with a real
-  // API key, we must not blow it away!
-  console.log('\nStep 3: Checking config file...');
+  // Step 3: Config file
+  console.log('\n3. Config file');
   if (fs.existsSync(CONFIG_FILE)) {
-    console.log(`[install] Config already exists at ${CONFIG_FILE} — leaving it untouched.`);
+    console.log(`  Exists: ${CONFIG_FILE} (not overwriting)`);
   } else {
-    const defaultConfig = JSON.stringify(DEFAULTS, null, 2);
-    fs.writeFileSync(CONFIG_FILE, defaultConfig, 'utf8');
-    console.log(`[install] Created default config at ${CONFIG_FILE}`);
-    console.log('[install] IMPORTANT: Open that file and add your DeepSeek API key to the deepseekApiKey field before starting the server.');
+    fs.writeFileSync(CONFIG_FILE, JSON.stringify(DEFAULTS, null, 2), 'utf8');
+    console.log(`  Created: ${CONFIG_FILE}`);
+    console.log('  Add your API key before starting the server.');
   }
 
-  // Step 4: Create the macOS Launch Agent plist.
-  console.log('\nStep 4: Installing macOS Launch Agent...');
-  ensureDir(PLIST_DIR); // Should already exist, but let's be safe
-
-  const plistContent = buildPlistContent();
-  fs.writeFileSync(PLIST_FILE, plistContent, 'utf8');
-  console.log(`[install] Wrote Launch Agent plist to: ${PLIST_FILE}`);
-
-  // Step 5: Load the Launch Agent with launchctl.
-  // launchctl is macOS's command for managing Launch Agents/Daemons.
-  // "load" tells macOS to read the plist and start the service.
-  // We pass -w to also enable it (remove any disabled override).
-  console.log('\nStep 5: Loading Launch Agent with launchctl...');
-  try {
-    // First, try to unload any existing instance (ignore errors if it wasn't loaded)
-    try {
-      execSync(`launchctl unload "${PLIST_FILE}" 2>/dev/null`, { stdio: 'pipe' });
-      console.log('[install] Unloaded existing Launch Agent (if any).');
-    } catch (_) {
-      // It's fine if unload fails — it just means it wasn't loaded yet
-    }
-
-    // Now load the new plist
-    execSync(`launchctl load -w "${PLIST_FILE}"`, { stdio: 'inherit' });
-    console.log('[install] Launch Agent loaded successfully.');
-    console.log(`[install] Tab Out server will start automatically on login.`);
-  } catch (err) {
-    // launchctl can fail for various reasons (e.g. if server/index.js doesn't exist yet).
-    // This is non-fatal during initial setup — the server just won't auto-start until
-    // that file exists.
-    console.warn(`[install] Warning: launchctl load failed: ${err.message}`);
-    console.warn('[install] You can manually load it later with:');
-    console.warn(`[install]   launchctl load -w "${PLIST_FILE}"`);
+  // Step 4: Platform-specific auto-start
+  console.log('\n4. Auto-start service');
+  if (platform === 'darwin') {
+    installMacOS();
+  } else if (platform === 'linux') {
+    installLinux();
+  } else if (platform === 'win32') {
+    installWindows();
+  } else {
+    console.warn(`  Unsupported platform: ${platform}`);
+    console.warn('  You will need to start the server manually with: npm start');
   }
 
-  // Done!
-  console.log('\n=== Tab Out installation complete! ===\n');
-  console.log('Next step: Add your DeepSeek API key to the config file shown below.');
-  console.log('Then run: npm start');
-  console.log('');
-  console.log('To start the server manually: npm start');
-  console.log(`Config file: ${CONFIG_FILE}`);
-  console.log(`Logs: ${LOGS_DIR}`);
+  console.log('\n=== Installation complete! ===\n');
+  console.log(`Config: ${CONFIG_FILE}`);
+  console.log(`Logs:   ${LOGS_DIR}`);
+  console.log('Start:  npm start');
   console.log('');
 }
 

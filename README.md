@@ -32,7 +32,7 @@ The agent will walk you through choosing your LLM provider and setting up your A
 
 ## Prerequisites
 
-- **macOS** — the auto-start feature uses macOS Launch Agents
+- **macOS, Windows, or Linux** — auto-start works on all three platforms
 - **Node.js 18+** — [download here](https://nodejs.org)
 - **Google Chrome**
 - **An LLM API key** — we recommend [DeepSeek](https://platform.deepseek.com) (fractions of a cent per call), but any OpenAI-compatible provider works
@@ -60,7 +60,7 @@ npm install
 npm run install-service
 ```
 
-This creates the `~/.mission-control/` data directory, writes a default config file, and installs a macOS Launch Agent so the server starts automatically when you log in.
+This creates the data directory, writes a default config file, and installs a platform-specific auto-start service (macOS Launch Agent, Linux systemd user service, or Windows Startup script) so the server runs automatically on login.
 
 **4. Add your API key**
 
@@ -178,7 +178,7 @@ The `customPromptRules` field lets you teach the AI your personal preferences fo
 | Database | better-sqlite3 |
 | AI clustering | Any OpenAI-compatible API |
 | Chrome extension | Manifest V3 |
-| Auto-start | macOS Launch Agent |
+| Auto-start | macOS Launch Agent / Linux systemd / Windows Startup |
 
 ---
 
