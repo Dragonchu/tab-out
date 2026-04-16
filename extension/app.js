@@ -1114,7 +1114,7 @@ async function fetchAndCacheRSSFeed(feedUrl) {
 }
 
 /**
- * getUnreadArticles(feedUrl, allArticles, readSet, limit)
+ * getUnreadArticles(allArticles, readSet, limit)
  * Returns the first `limit` unread articles from the list.
  */
 function getUnreadArticles(allArticles, readSet, limit) {
@@ -1203,21 +1203,18 @@ function renderRSSCard(feed, articles, readSet) {
 async function renderRSSSection() {
   const section    = document.getElementById('rssFeedsSection');
   const missionsEl = document.getElementById('rssFeedsMissions');
-  const countEl    = document.getElementById('rssSectionCount');
   if (!section || !missionsEl) return;
 
   const feeds = await getRSSFeeds();
 
   // Always show the section so the + button is accessible
   section.style.display = 'block';
+  await updateRSSSectionCount();
 
   if (feeds.length === 0) {
-    if (countEl) countEl.textContent = '';
     missionsEl.innerHTML = '';
     return;
   }
-
-  if (countEl) countEl.textContent = `${feeds.length} feed${feeds.length !== 1 ? 's' : ''}`;
 
   // Fetch articles for all feeds in parallel
   const readState = await getRSSReadState();
@@ -1241,6 +1238,20 @@ async function renderRSSSection() {
   }).join('');
 
   missionsEl.innerHTML = cardsHtml;
+}
+
+/**
+ * updateRSSSectionCount()
+ * Updates the RSS section feed count display.
+ */
+async function updateRSSSectionCount() {
+  const feeds   = await getRSSFeeds();
+  const countEl = document.getElementById('rssSectionCount');
+  if (countEl) {
+    countEl.textContent = feeds.length > 0
+      ? `${feeds.length} feed${feeds.length !== 1 ? 's' : ''}`
+      : '';
+  }
 }
 
 /**
@@ -1769,15 +1780,8 @@ document.addEventListener('click', async (e) => {
       animateCardOut(card);
     }
 
-    // Update section count or hide section
-    const feeds = await getRSSFeeds();
-    const section = document.getElementById('rssFeedsSection');
-    const countEl = document.getElementById('rssSectionCount');
-    if (feeds.length === 0 && section) {
-      section.style.display = 'none';
-    } else if (countEl) {
-      countEl.textContent = `${feeds.length} feed${feeds.length !== 1 ? 's' : ''}`;
-    }
+    // Update section count
+    await updateRSSSectionCount();
 
     showToast('Feed removed');
     return;
