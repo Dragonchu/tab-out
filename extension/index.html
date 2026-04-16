@@ -64,6 +64,23 @@
       <div class="missions" id="openTabsMissions"></div>
     </div>
 
+    <!-- RSS Feeds Section — below open tabs -->
+    <div class="active-section rss-section" id="rssFeedsSection" style="display:none">
+      <div class="section-header">
+        <h2>RSS</h2>
+        <div class="section-line"></div>
+        <div class="section-count" id="rssSectionCount"></div>
+        <button class="rss-add-btn" id="rssAddBtn" title="Add RSS feed">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+        </button>
+      </div>
+      <div class="rss-add-form" id="rssAddForm" style="display:none">
+        <input type="text" class="rss-add-input" id="rssAddInput" placeholder="Paste RSS feed URL and press Enter...">
+        <div class="rss-add-error" id="rssAddError" style="display:none"></div>
+      </div>
+      <div class="missions" id="rssFeedsMissions"></div>
+    </div>
+
     <!-- RIGHT COLUMN: Saved for Later checklist -->
     <div class="deferred-column" id="deferredColumn" style="display:none">
       <div class="section-header">
