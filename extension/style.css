@@ -1156,3 +1156,129 @@ footer { animation: fadeUp 0.5s ease 0.65s both; }
   opacity: 0.6;
   flex-shrink: 0;
 }
+
+
+/* ================================================================
+   RSS FEED SECTION
+   ================================================================ */
+
+/* ---- Add feed button in section header ---- */
+.rss-add-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--warm-gray);
+  border-radius: 4px;
+  background: var(--card-bg);
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.rss-add-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.rss-add-btn:hover {
+  border-color: var(--accent-sage);
+  color: var(--accent-sage);
+  background: rgba(90, 122, 98, 0.06);
+}
+
+/* ---- Inline add-feed form ---- */
+.rss-add-form {
+  margin-bottom: 16px;
+}
+
+.rss-add-input {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 13px;
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--warm-gray);
+  border-radius: 6px;
+  background: var(--card-bg);
+  color: var(--ink);
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.rss-add-input:focus {
+  border-color: var(--accent-sage);
+}
+
+.rss-add-input::placeholder {
+  color: var(--muted);
+}
+
+.rss-add-error {
+  font-size: 12px;
+  color: var(--status-abandoned);
+  margin-top: 6px;
+  padding: 0 2px;
+}
+
+/* ---- RSS section fade-in animation ---- */
+.rss-section .section-header { animation: fadeUp 0.5s ease 0.3s both; }
+.rss-section .missions .mission-card:nth-child(1) { animation: fadeUp 0.4s ease 0.35s both; }
+.rss-section .missions .mission-card:nth-child(2) { animation: fadeUp 0.4s ease 0.4s both; }
+.rss-section .missions .mission-card:nth-child(3) { animation: fadeUp 0.4s ease 0.45s both; }
+.rss-section .missions .mission-card:nth-child(4) { animation: fadeUp 0.4s ease 0.5s both; }
+
+/* ---- Mark-as-read button on RSS article chips ---- */
+.chip-mark-read:hover {
+  color: var(--accent-sage);
+  background: rgba(90, 122, 98, 0.08);
+}
+
+/* ---- Feed delete confirmation inline area ---- */
+.rss-delete-confirm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.rss-delete-confirm .action-btn {
+  font-size: 11px;
+  padding: 3px 10px;
+}
+
+/* ---- Delete button on feed card (appears on hover) ---- */
+.rss-card-delete {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  background: rgba(179, 90, 90, 0.08);
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.15s;
+  z-index: 2;
+}
+
+.rss-card-delete svg {
+  width: 12px;
+  height: 12px;
+}
+
+.rss-card-delete:hover {
+  color: var(--status-abandoned);
+  background: rgba(179, 90, 90, 0.15);
+}
+
+.mission-card.rss-feed-card:hover .rss-card-delete {
+  display: flex;
+}

@@ -28,10 +28,19 @@ The agent will walk you through it. Takes about 1 minute.
 - **Duplicate detection** flags when you have the same page open twice, with one-click cleanup
 - **Click any tab to jump to it** across windows, no new tab opened
 - **Save for later** bookmark tabs to a checklist before closing them
+- **RSS feed subscriptions** add RSS feeds and see unread articles right on your new tab page
 - **Localhost grouping** shows port numbers next to each tab so you can tell your vibe coding projects apart
 - **Expandable groups** show the first 8 tabs with a clickable "+N more"
 - **100% local** your data never leaves your machine
 - **Pure Chrome extension** no server, no Node.js, no npm, no setup beyond loading the extension
+
+---
+
+## Permissions
+
+Tab Out requires broad host permissions (`https://*/*` and `http://*/*`) so it can fetch RSS feeds from any site directly from the extension. This is the [Chrome-official mechanism](https://developer.chrome.com/docs/extensions/develop/concepts/declare-permissions) for extensions to make cross-origin requests.
+
+Chrome will display a warning during installation: **"This extension can read and change all your data on all websites."** Tab Out never reads or modifies any website content — the permission is used exclusively to fetch RSS XML from feed URLs you subscribe to. All data stays local on your machine.
 
 ---
 

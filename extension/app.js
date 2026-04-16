@@ -1005,6 +1005,287 @@ function renderArchiveItem(item) {
 
 
 /* ----------------------------------------------------------------
+   RSS FEED MANAGEMENT
+   ---------------------------------------------------------------- */
+
+/** Default number of unread articles to show per feed card */
+const RSS_ARTICLES_PER_CARD = 3;
+
+/**
+ * getRSSFeeds()
+ * Returns array of subscribed feed objects: [{ url, name }]
+ */
+async function getRSSFeeds() {
+  try {
+    const data = await chrome.storage.local.get('rssFeeds');
+    return data.rssFeeds || [];
+  } catch { return []; }
+}
+
+/**
+ * addRSSFeed(feedUrl, feedName)
+ * Adds a new feed subscription.
+ */
+async function addRSSFeed(feedUrl, feedName) {
+  const feeds = await getRSSFeeds();
+  if (feeds.some(f => f.url === feedUrl)) return; // already subscribed
+  feeds.push({ url: feedUrl, name: feedName });
+  await chrome.storage.local.set({ rssFeeds: feeds });
+}
+
+/**
+ * removeRSSFeed(feedUrl)
+ * Removes a feed subscription and its read state + cached articles.
+ */
+async function removeRSSFeed(feedUrl) {
+  let feeds = await getRSSFeeds();
+  feeds = feeds.filter(f => f.url !== feedUrl);
+  await chrome.storage.local.set({ rssFeeds: feeds });
+
+  // Clean up read state and cached articles for this feed
+  const data = await chrome.storage.local.get(['rssReadState', 'rssArticles']);
+  const readState = data.rssReadState || {};
+  const articles  = data.rssArticles  || {};
+  delete readState[feedUrl];
+  delete articles[feedUrl];
+  await chrome.storage.local.set({ rssReadState: readState, rssArticles: articles });
+}
+
+/**
+ * getRSSReadState()
+ * Returns { feedUrl: Set of read article IDs }
+ */
+async function getRSSReadState() {
+  const data = await chrome.storage.local.get('rssReadState');
+  const raw = data.rssReadState || {};
+  const result = {};
+  for (const [url, ids] of Object.entries(raw)) {
+    result[url] = new Set(ids);
+  }
+  return result;
+}
+
+/**
+ * markRSSArticleRead(feedUrl, articleId)
+ * Marks an article as read and persists to storage.
+ */
+async function markRSSArticleRead(feedUrl, articleId) {
+  const data = await chrome.storage.local.get('rssReadState');
+  const readState = data.rssReadState || {};
+  if (!readState[feedUrl]) readState[feedUrl] = [];
+  if (!readState[feedUrl].includes(articleId)) {
+    readState[feedUrl].push(articleId);
+  }
+  await chrome.storage.local.set({ rssReadState: readState });
+}
+
+/**
+ * fetchAndCacheRSSFeed(feedUrl)
+ * Fetches articles via the background service worker and caches them.
+ * Returns the article array.
+ */
+async function fetchAndCacheRSSFeed(feedUrl) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(
+      { type: 'fetch-rss', feedUrl, limit: 20 },
+      (response) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+        if (response && response.error) {
+          reject(new Error(response.error));
+          return;
+        }
+        if (response && response.articles) {
+          // Cache articles
+          chrome.storage.local.get('rssArticles', (data) => {
+            const articles = data.rssArticles || {};
+            articles[feedUrl] = response.articles;
+            chrome.storage.local.set({ rssArticles: articles });
+          });
+          resolve(response.articles);
+        } else {
+          reject(new Error('No response from service worker'));
+        }
+      }
+    );
+  });
+}
+
+/**
+ * getUnreadArticles(allArticles, readSet, limit)
+ * Returns the first `limit` unread articles from the list.
+ */
+function getUnreadArticles(allArticles, readSet, limit) {
+  const unread = [];
+  for (const article of allArticles) {
+    if (unread.length >= limit) break;
+    if (!readSet.has(article.id)) unread.push(article);
+  }
+  return unread;
+}
+
+/**
+ * deriveFeedName(feedUrl)
+ * Extracts a human-readable name from a feed URL.
+ */
+function deriveFeedName(feedUrl) {
+  try {
+    const parsed = new URL(feedUrl);
+    return parsed.hostname.replace(/^www\./, '');
+  } catch {
+    return feedUrl;
+  }
+}
+
+/**
+ * renderRSSCard(feed, articles, readSet)
+ * Builds the HTML for one RSS feed card, showing unread articles.
+ */
+function renderRSSCard(feed, articles, readSet) {
+  const unread = getUnreadArticles(articles || [], readSet, RSS_ARTICLES_PER_CARD);
+  const totalUnread = (articles || []).filter(a => !readSet.has(a.id)).length;
+  const safeFeedUrl = feed.url.replace(/"/g, '&quot;');
+
+  const articleChips = unread.map(article => {
+    const safeArticleUrl = (article.link || '').replace(/"/g, '&quot;');
+    const safeArticleId  = (article.id || '').replace(/"/g, '&quot;');
+    const safeTitle      = (article.title || 'Untitled').replace(/"/g, '&quot;');
+    let domain = '';
+    try { domain = new URL(article.link).hostname; } catch {}
+    const faviconUrl = domain ? `https://www.google.com/s2/favicons?domain=${domain}&sz=16` : '';
+
+    return `<div class="page-chip clickable" data-action="open-rss-article" data-article-url="${safeArticleUrl}" data-article-id="${safeArticleId}" data-feed-url="${safeFeedUrl}" title="${safeTitle}">
+      ${faviconUrl ? `<img class="chip-favicon" src="${faviconUrl}" alt="" onerror="this.style.display='none'">` : ''}
+      <span class="chip-text">${article.title || 'Untitled'}</span>
+      <div class="chip-actions">
+        <button class="chip-action chip-mark-read" data-action="mark-rss-read" data-article-id="${safeArticleId}" data-feed-url="${safeFeedUrl}" title="Mark as read">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
+        </button>
+      </div>
+    </div>`;
+  }).join('');
+
+  const unreadBadge = totalUnread > 0
+    ? `<span class="open-tabs-badge" style="color:var(--accent-sage);background:rgba(90,122,98,0.08);">${totalUnread} unread</span>`
+    : `<span class="open-tabs-badge">All read</span>`;
+
+  return `
+    <div class="mission-card rss-feed-card has-neutral-bar" data-feed-url="${safeFeedUrl}">
+      <div class="status-bar"></div>
+      <button class="rss-card-delete" data-action="rss-delete-start" data-feed-url="${safeFeedUrl}" title="Remove feed">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" /></svg>
+      </button>
+      <div class="mission-content">
+        <div class="mission-top">
+          <span class="mission-name">${feed.name || deriveFeedName(feed.url)}</span>
+          ${unreadBadge}
+        </div>
+        <div class="mission-pages">${articleChips}</div>
+        <div class="rss-delete-confirm" data-feed-url="${safeFeedUrl}" style="display:none">
+          Remove this feed?
+          <button class="action-btn danger" data-action="rss-delete-confirm" data-feed-url="${safeFeedUrl}">Confirm</button>
+          <button class="action-btn" data-action="rss-delete-cancel" data-feed-url="${safeFeedUrl}">Cancel</button>
+        </div>
+      </div>
+      <div class="mission-meta">
+        <div class="mission-page-count">${totalUnread}</div>
+        <div class="mission-page-label">unread</div>
+      </div>
+    </div>`;
+}
+
+/**
+ * renderRSSSection()
+ * Fetches all subscribed feeds, refreshes articles, and renders the RSS section.
+ */
+async function renderRSSSection() {
+  const section    = document.getElementById('rssFeedsSection');
+  const missionsEl = document.getElementById('rssFeedsMissions');
+  if (!section || !missionsEl) return;
+
+  const feeds = await getRSSFeeds();
+
+  // Always show the section so the + button is accessible
+  section.style.display = 'block';
+  await updateRSSSectionCount();
+
+  if (feeds.length === 0) {
+    missionsEl.innerHTML = '';
+    return;
+  }
+
+  // Fetch articles for all feeds in parallel
+  const readState = await getRSSReadState();
+  const feedArticles = {};
+
+  await Promise.allSettled(feeds.map(async (feed) => {
+    try {
+      feedArticles[feed.url] = await fetchAndCacheRSSFeed(feed.url);
+    } catch {
+      // Use cached articles as fallback
+      const cached = await chrome.storage.local.get('rssArticles');
+      feedArticles[feed.url] = (cached.rssArticles || {})[feed.url] || [];
+    }
+  }));
+
+  // Render cards
+  const cardsHtml = feeds.map(feed => {
+    const articles = feedArticles[feed.url] || [];
+    const readSet  = readState[feed.url] || new Set();
+    return renderRSSCard(feed, articles, readSet);
+  }).join('');
+
+  missionsEl.innerHTML = cardsHtml;
+}
+
+/**
+ * updateRSSSectionCount()
+ * Updates the RSS section feed count display.
+ */
+async function updateRSSSectionCount() {
+  const feeds   = await getRSSFeeds();
+  const countEl = document.getElementById('rssSectionCount');
+  if (countEl) {
+    countEl.textContent = feeds.length > 0
+      ? `${feeds.length} feed${feeds.length !== 1 ? 's' : ''}`
+      : '';
+  }
+}
+
+/**
+ * refreshSingleRSSCard(feedUrl)
+ * Re-renders a single RSS feed card in place after a read state change.
+ */
+async function refreshSingleRSSCard(feedUrl) {
+  const missionsEl = document.getElementById('rssFeedsMissions');
+  if (!missionsEl) return;
+
+  const feeds = await getRSSFeeds();
+  const feed = feeds.find(f => f.url === feedUrl);
+  if (!feed) return;
+
+  const readState = await getRSSReadState();
+  const readSet   = readState[feedUrl] || new Set();
+
+  // Get cached articles
+  const cached = await chrome.storage.local.get('rssArticles');
+  const articles = (cached.rssArticles || {})[feedUrl] || [];
+
+  const newCardHtml = renderRSSCard(feed, articles, readSet);
+
+  // Find and replace the existing card
+  const existingCard = missionsEl.querySelector(`[data-feed-url="${CSS.escape(feedUrl)}"]`);
+  if (existingCard) {
+    const temp = document.createElement('div');
+    temp.innerHTML = newCardHtml;
+    existingCard.replaceWith(temp.firstElementChild);
+  }
+}
+
+
+/* ----------------------------------------------------------------
    MAIN DASHBOARD RENDERER
    ---------------------------------------------------------------- */
 
@@ -1166,6 +1447,9 @@ async function renderStaticDashboard() {
 
   // --- Render "Saved for Later" column ---
   await renderDeferredColumn();
+
+  // --- Render RSS Feeds section ---
+  await renderRSSSection();
 }
 
 async function renderDashboard() {
@@ -1431,6 +1715,87 @@ document.addEventListener('click', async (e) => {
     showToast('All tabs closed. Fresh start.');
     return;
   }
+
+  // ---- RSS: Open article (auto-mark as read) ----
+  if (action === 'open-rss-article') {
+    const articleUrl = actionEl.dataset.articleUrl;
+    const articleId  = actionEl.dataset.articleId;
+    const feedUrl    = actionEl.dataset.feedUrl;
+    if (articleUrl) {
+      window.open(articleUrl, '_blank');
+    }
+    if (feedUrl && articleId) {
+      await markRSSArticleRead(feedUrl, articleId);
+      await refreshSingleRSSCard(feedUrl);
+    }
+    return;
+  }
+
+  // ---- RSS: Mark article as read without opening ----
+  if (action === 'mark-rss-read') {
+    e.stopPropagation();
+    const articleId = actionEl.dataset.articleId;
+    const feedUrl   = actionEl.dataset.feedUrl;
+    if (!feedUrl || !articleId) return;
+
+    await markRSSArticleRead(feedUrl, articleId);
+
+    // Animate the chip out
+    const chip = actionEl.closest('.page-chip');
+    if (chip) {
+      chip.style.transition = 'opacity 0.2s, transform 0.2s';
+      chip.style.opacity    = '0';
+      chip.style.transform  = 'scale(0.8)';
+      setTimeout(async () => {
+        await refreshSingleRSSCard(feedUrl);
+      }, 200);
+    }
+
+    showToast('Marked as read');
+    return;
+  }
+
+  // ---- RSS: Start delete flow (show confirmation) ----
+  if (action === 'rss-delete-start') {
+    e.stopPropagation();
+    const feedUrl = actionEl.dataset.feedUrl;
+    const card = actionEl.closest('.rss-feed-card');
+    if (card) {
+      const confirm = card.querySelector('.rss-delete-confirm');
+      if (confirm) confirm.style.display = 'flex';
+    }
+    return;
+  }
+
+  // ---- RSS: Confirm delete ----
+  if (action === 'rss-delete-confirm') {
+    const feedUrl = actionEl.dataset.feedUrl;
+    if (!feedUrl) return;
+
+    await removeRSSFeed(feedUrl);
+
+    const card = actionEl.closest('.rss-feed-card');
+    if (card) {
+      playCloseSound();
+      animateCardOut(card);
+    }
+
+    // Update section count
+    await updateRSSSectionCount();
+
+    showToast('Feed removed');
+    return;
+  }
+
+  // ---- RSS: Cancel delete ----
+  if (action === 'rss-delete-cancel') {
+    const card = actionEl.closest('.rss-feed-card');
+    if (card) {
+      const confirm = card.querySelector('.rss-delete-confirm');
+      if (confirm) confirm.style.display = 'none';
+    }
+    return;
+  }
 });
 
 // ---- Archive toggle — expand/collapse the archive section ----
@@ -1473,6 +1838,95 @@ document.addEventListener('input', async (e) => {
   } catch (err) {
     console.warn('[tab-out] Archive search failed:', err);
   }
+});
+
+
+// ---- RSS: Add feed button — toggle inline input ----
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('#rssAddBtn');
+  if (!btn) return;
+
+  const form = document.getElementById('rssAddForm');
+  const input = document.getElementById('rssAddInput');
+  if (!form) return;
+
+  if (form.style.display === 'none') {
+    form.style.display = 'block';
+    if (input) input.focus();
+  } else {
+    form.style.display = 'none';
+    if (input) input.value = '';
+    const errorEl = document.getElementById('rssAddError');
+    if (errorEl) errorEl.style.display = 'none';
+  }
+});
+
+// ---- RSS: Submit feed URL on Enter ----
+document.addEventListener('keydown', async (e) => {
+  if (e.target.id !== 'rssAddInput' || e.key !== 'Enter') return;
+
+  const input   = e.target;
+  const feedUrl = input.value.trim();
+  const errorEl = document.getElementById('rssAddError');
+
+  if (!feedUrl) return;
+
+  // Basic URL validation
+  try {
+    const parsed = new URL(feedUrl);
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+      throw new Error('Only http/https URLs are supported');
+    }
+  } catch (err) {
+    if (errorEl) {
+      errorEl.textContent = err.message || 'Invalid URL';
+      errorEl.style.display = 'block';
+    }
+    return;
+  }
+
+  // Check for duplicate subscription
+  const existingFeeds = await getRSSFeeds();
+  if (existingFeeds.some(f => f.url === feedUrl)) {
+    if (errorEl) {
+      errorEl.textContent = 'Already subscribed to this feed';
+      errorEl.style.display = 'block';
+    }
+    return;
+  }
+
+  // Clear any previous error
+  if (errorEl) errorEl.style.display = 'none';
+
+  // Try fetching the feed to validate it
+  try {
+    input.disabled = true;
+    input.placeholder = 'Validating feed...';
+    await fetchAndCacheRSSFeed(feedUrl);
+  } catch (err) {
+    if (errorEl) {
+      errorEl.textContent = err.message || 'Not a valid RSS feed';
+      errorEl.style.display = 'block';
+    }
+    input.disabled = false;
+    input.placeholder = 'Paste RSS feed URL and press Enter...';
+    return;
+  }
+
+  // Feed is valid — add it
+  const feedName = deriveFeedName(feedUrl);
+  await addRSSFeed(feedUrl, feedName);
+
+  // Reset input
+  input.value = '';
+  input.disabled = false;
+  input.placeholder = 'Paste RSS feed URL and press Enter...';
+  const form = document.getElementById('rssAddForm');
+  if (form) form.style.display = 'none';
+
+  // Re-render RSS section
+  await renderRSSSection();
+  showToast('Feed added');
 });
 
 

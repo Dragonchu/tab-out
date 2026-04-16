@@ -87,6 +87,82 @@ chrome.tabs.onUpdated.addListener(() => {
   updateBadge();
 });
 
+// ─── RSS Feed Fetching ───────────────────────────────────────────────────────
+
+/**
+ * fetchRSSFeed(feedUrl, limit)
+ *
+ * Fetches an RSS or Atom feed from the given URL, parses the XML,
+ * and returns up to `limit` article entries.
+ *
+ * Each article: { id, title, link, pubDate }
+ * id = link URL (guaranteed unique per feed)
+ *
+ * This runs in the service worker so it can bypass CORS via host_permissions.
+ */
+async function fetchRSSFeed(feedUrl, limit = 20) {
+  const response = await fetch(feedUrl);
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+  const text = await response.text();
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(text, 'text/xml');
+
+  // Check for XML parse errors
+  const parseError = doc.querySelector('parsererror');
+  if (parseError) throw new Error('Invalid RSS feed');
+
+  const articles = [];
+
+  // Try RSS 2.0 (<item> elements)
+  const items = doc.querySelectorAll('item');
+  if (items.length > 0) {
+    for (const item of items) {
+      if (articles.length >= limit) break;
+      const title = item.querySelector('title')?.textContent?.trim() || 'Untitled';
+      const link = item.querySelector('link')?.textContent?.trim() || '';
+      const pubDate = item.querySelector('pubDate')?.textContent?.trim() || '';
+      const guid = item.querySelector('guid')?.textContent?.trim() || link;
+      articles.push({ id: guid || link || title, title, link, pubDate });
+    }
+    return articles;
+  }
+
+  // Try Atom (<entry> elements)
+  const entries = doc.querySelectorAll('entry');
+  for (const entry of entries) {
+    if (articles.length >= limit) break;
+    const title = entry.querySelector('title')?.textContent?.trim() || 'Untitled';
+    const linkEl = entry.querySelector('link[href]');
+    const link = linkEl?.getAttribute('href') || '';
+    const pubDate = entry.querySelector('published')?.textContent?.trim()
+                 || entry.querySelector('updated')?.textContent?.trim() || '';
+    const id = entry.querySelector('id')?.textContent?.trim() || link || title;
+    articles.push({ id, title, link, pubDate });
+  }
+
+  if (articles.length === 0) throw new Error('No articles found — not a valid RSS/Atom feed');
+
+  return articles;
+}
+
+/**
+ * Message handler for RSS operations from the dashboard page.
+ *
+ * Messages:
+ *   { type: 'fetch-rss', feedUrl, limit? }  → returns { articles: [...] }
+ */
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message.type === 'fetch-rss') {
+    const limit = message.limit || 20;
+    fetchRSSFeed(message.feedUrl, limit)
+      .then(articles => sendResponse({ articles }))
+      .catch(err => sendResponse({ error: err.message }));
+    return true; // keep channel open for async response
+  }
+});
+
+
 // ─── Initial run ─────────────────────────────────────────────────────────────
 
 // Run once immediately when the service worker first loads
