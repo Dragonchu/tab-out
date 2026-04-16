@@ -108,7 +108,8 @@ chrome.tabs.onUpdated.addListener(() => {
  * Handles CDATA sections and strips surrounding whitespace.
  */
 function getTagContent(xml, tagName) {
-  const re = new RegExp(`<${tagName}[^>]*>\\s*(?:<!\\[CDATA\\[([\\s\\S]*?)\\]\\]>|([\\s\\S]*?))\\s*</${tagName}>`, 'i');
+  const escaped = tagName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`<${escaped}(?:\\s[^>]*)?>\\s*(?:<!\\[CDATA\\[([\\s\\S]*?)\\]\\]>|([\\s\\S]*?))\\s*</${escaped}>`, 'i');
   const m = xml.match(re);
   if (!m) return '';
   return (m[1] ?? m[2] ?? '').trim();
@@ -142,9 +143,8 @@ async function fetchRSSFeed(feedUrl, limit = 20) {
   const articles = [];
 
   // Try RSS 2.0 (<item> elements)
-  const itemRe = /<item[\s>]([\s\S]*?)<\/item>/gi;
-  let match;
-  while ((match = itemRe.exec(text)) !== null) {
+  const itemRe = /<item(?:\s[^>]*)?>(\s[\s\S]*?)<\/item>/gi;
+  for (const match of text.matchAll(itemRe)) {
     if (articles.length >= limit) break;
     const block = match[1];
     const title = getTagContent(block, 'title') || 'Untitled';
@@ -157,8 +157,8 @@ async function fetchRSSFeed(feedUrl, limit = 20) {
   if (articles.length > 0) return articles;
 
   // Try Atom (<entry> elements)
-  const entryRe = /<entry[\s>]([\s\S]*?)<\/entry>/gi;
-  while ((match = entryRe.exec(text)) !== null) {
+  const entryRe = /<entry(?:\s[^>]*)?>(\s[\s\S]*?)<\/entry>/gi;
+  for (const match of text.matchAll(entryRe)) {
     if (articles.length >= limit) break;
     const block = match[1];
     const title = getTagContent(block, 'title') || 'Untitled';
