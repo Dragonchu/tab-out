@@ -100,44 +100,71 @@ chrome.tabs.onUpdated.addListener(() => {
  *
  * This runs in the service worker so it can bypass CORS via host_permissions.
  */
+/**
+ * getTagContent(xml, tagName)
+ *
+ * Extracts the text content of the first occurrence of <tagName>…</tagName>
+ * within the given XML string. Returns '' if the tag is not found.
+ * Handles CDATA sections and strips surrounding whitespace.
+ */
+function getTagContent(xml, tagName) {
+  const re = new RegExp(`<${tagName}[^>]*>\\s*(?:<!\\[CDATA\\[([\\s\\S]*?)\\]\\]>|([\\s\\S]*?))\\s*</${tagName}>`, 'i');
+  const m = xml.match(re);
+  if (!m) return '';
+  return (m[1] ?? m[2] ?? '').trim();
+}
+
+/**
+ * getAtomLinkHref(xml)
+ *
+ * Extracts the href attribute from the first <link … href="…" /> or
+ * <link … href="…">…</link> element in the given XML string.
+ * Prioritises rel="alternate" if present, otherwise takes the first <link>.
+ */
+function getAtomLinkHref(xml) {
+  // Try rel="alternate" first
+  const altRe = /<link[^>]*\brel=["']alternate["'][^>]*\bhref=["']([^"']+)["'][^>]*\/?>/i;
+  const altMatch = xml.match(altRe);
+  if (altMatch) return altMatch[1].trim();
+
+  // Fall back to any <link> with an href
+  const re = /<link[^>]*\bhref=["']([^"']+)["'][^>]*\/?>/i;
+  const m = xml.match(re);
+  return m ? m[1].trim() : '';
+}
+
 async function fetchRSSFeed(feedUrl, limit = 20) {
   const response = await fetch(feedUrl);
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
   const text = await response.text();
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(text, 'text/xml');
-
-  // Check for XML parse errors
-  const parseError = doc.querySelector('parsererror');
-  if (parseError) throw new Error('Invalid RSS feed');
 
   const articles = [];
 
   // Try RSS 2.0 (<item> elements)
-  const items = doc.querySelectorAll('item');
-  if (items.length > 0) {
-    for (const item of items) {
-      if (articles.length >= limit) break;
-      const title = item.querySelector('title')?.textContent?.trim() || 'Untitled';
-      const link = item.querySelector('link')?.textContent?.trim() || '';
-      const pubDate = item.querySelector('pubDate')?.textContent?.trim() || '';
-      const guid = item.querySelector('guid')?.textContent?.trim() || link;
-      articles.push({ id: guid || link || title, title, link, pubDate });
-    }
-    return articles;
+  const itemRe = /<item[\s>]([\s\S]*?)<\/item>/gi;
+  let match;
+  while ((match = itemRe.exec(text)) !== null) {
+    if (articles.length >= limit) break;
+    const block = match[1];
+    const title = getTagContent(block, 'title') || 'Untitled';
+    const link = getTagContent(block, 'link');
+    const pubDate = getTagContent(block, 'pubDate');
+    const guid = getTagContent(block, 'guid') || link;
+    articles.push({ id: guid || link || title, title, link, pubDate });
   }
 
+  if (articles.length > 0) return articles;
+
   // Try Atom (<entry> elements)
-  const entries = doc.querySelectorAll('entry');
-  for (const entry of entries) {
+  const entryRe = /<entry[\s>]([\s\S]*?)<\/entry>/gi;
+  while ((match = entryRe.exec(text)) !== null) {
     if (articles.length >= limit) break;
-    const title = entry.querySelector('title')?.textContent?.trim() || 'Untitled';
-    const linkEl = entry.querySelector('link[href]');
-    const link = linkEl?.getAttribute('href') || '';
-    const pubDate = entry.querySelector('published')?.textContent?.trim()
-                 || entry.querySelector('updated')?.textContent?.trim() || '';
-    const id = entry.querySelector('id')?.textContent?.trim() || link || title;
+    const block = match[1];
+    const title = getTagContent(block, 'title') || 'Untitled';
+    const link = getAtomLinkHref(block);
+    const pubDate = getTagContent(block, 'published') || getTagContent(block, 'updated');
+    const id = getTagContent(block, 'id') || link || title;
     articles.push({ id, title, link, pubDate });
   }
 
