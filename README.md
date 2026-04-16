@@ -38,7 +38,7 @@ The agent will walk you through it. Takes about 1 minute.
 
 ## Permissions
 
-Tab Out requires the `https://*/*` host permission so it can fetch RSS feeds from any site directly from the extension. This is the [Chrome-official mechanism](https://developer.chrome.com/docs/extensions/develop/concepts/declare-permissions) for extensions to make cross-origin requests.
+Tab Out requires broad host permissions (`https://*/*` and `http://*/*`) so it can fetch RSS feeds from any site directly from the extension. This is the [Chrome-official mechanism](https://developer.chrome.com/docs/extensions/develop/concepts/declare-permissions) for extensions to make cross-origin requests.
 
 Chrome will display a warning during installation: **"This extension can read and change all your data on all websites."** Tab Out never reads or modifies any website content — the permission is used exclusively to fetch RSS XML from feed URLs you subscribe to. All data stays local on your machine.
 
